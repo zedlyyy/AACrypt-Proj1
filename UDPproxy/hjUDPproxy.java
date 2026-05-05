@@ -51,7 +51,6 @@ class hjUDPproxy {
         String[] films_list = available_films.split(",");
 
         SocketAddress serverSocketAddress = parseSocketAddress(remote);
-        Set<SocketAddress> outSocketAddressSet = Arrays.stream(destination.split(",")).map(s -> parseSocketAddress(s)).collect(Collectors.toSet());
 
         selectMovie(scanner, films_list, serverSocketAddress);
         movieTransmissionToLocal(proxy, destination);
