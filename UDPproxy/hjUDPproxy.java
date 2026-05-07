@@ -25,28 +25,41 @@ import java.net.MulticastSocket;
 import java.net.InetSocketAddress;
 import java.net.InetAddress;
 import java.net.SocketAddress;
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Properties;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 class hjUDPproxy {
-    @SuppressWarnings("unused")
+
+    private static final int MAX_PACKET_SIZE = 8192;
+    private static final byte START_TYPE	= 1;
+	private static final byte DATA_TYPE		= 2; 
+	private static final byte END_TYPE		= 3;
+    private static final byte ERROR_TYPE	= 4;
+    private static final int IV_SIZE		= 16;
+
+
+    //@SuppressWarnings("unused")
     public static void main(String[] args) throws Exception {
-        InputStream inputStream = new FileInputStream("config.properties");
+        InputStream config          = new FileInputStream("config.properties");
+        InputStream crypto_config   = new FileInputStream("../cryptoconfig.properties");
         Scanner scanner = new Scanner(System.in);
         
-        if (inputStream == null) {
+        if (config == null || crypto_config == null) {
             System.err.println("Configuration file not found!");
             System.exit(1);
         }
         
-        Properties properties = new Properties();
-        properties.load(inputStream);
-	    String remote =             properties.getProperty("remote");
-        String proxy =              properties.getProperty("proxy");
-        String destination =        properties.getProperty("localdelivery");
-        String available_films =    properties.getProperty("available_films");
+        Properties config_properties        = new Properties();
+        Properties cryptoconfig_properties  = new Properties();
+        config_properties.load(config);
+        cryptoconfig_properties.load(crypto_config);
+	    String remote =             config_properties.getProperty("remote");
+        String proxy =              config_properties.getProperty("proxy");
+        String destination =        config_properties.getProperty("localdelivery");
+        String available_films =    config_properties.getProperty("available_films");
         
         String[] films_list = available_films.split(",");
 
@@ -92,16 +105,67 @@ class hjUDPproxy {
 
 	    DatagramSocket inSocket = new DatagramSocket(inSocketAddress); 
         DatagramSocket outSocket = new DatagramSocket();
-        byte[] buffer = new byte[4 * 1024];
-       
-        while (true) {
-            DatagramPacket inPacket = new DatagramPacket(buffer, buffer.length);
- 	        inSocket.receive(inPacket); 
+        byte[] in_packet_buffer = new byte[MAX_PACKET_SIZE];
 
-            System.out.print(".");
-            for (SocketAddress outSocketAddress : outSocketAddressSet) {
-              outSocket.send(new DatagramPacket(buffer, inPacket.getLength(), outSocketAddress));
+        boolean streaming = true;
+        while (streaming) {
+            DatagramPacket inPacket = new DatagramPacket(in_packet_buffer, in_packet_buffer.length);
+ 	        inSocket.receive(inPacket);
+            
+            ByteBuffer bb = ByteBuffer.wrap(inPacket.getData(), 0, inPacket.getLength());
+
+            byte type       = bb.get();
+            byte version    = bb.get();
+            int length      = bb.getInt();
+
+            byte[] payload = new byte[length];
+            bb.get(payload);
+
+            switch (type) {
+                case START_TYPE:
+                    System.out.println("> PROTOCOL VERSION: " + version);
+                    System.out.println("> Starting streaming now !");
+                    break;
+                case DATA_TYPE:
+                    sendFrame(payload, outSocketAddressSet, outSocket);
+                    break;
+                case END_TYPE:
+                    streaming = false;
+                    inSocket.close();
+                    System.out.println("> Stream has ended !");
+                    break;  
+                case ERROR_TYPE:
+                    System.out.println("AN ERROR HAS OCCURRED !");    
+                    System.exit(1); 
+                default:
+                    System.out.println("> Packet type not defined !!");
+                    break;
             }
         }
     }
+
+    private static void sendFrame(byte[] payload, Set<SocketAddress> outSocketAddressSet, DatagramSocket outSocket) throws IOException {
+        System.out.print(".");
+        for (SocketAddress outSocketAddress : outSocketAddressSet) {
+              outSocket.send(new DatagramPacket(payload, payload.length, outSocketAddress));
+        }
+    }
+
+	private static byte[] hexToBytes(String hex) {
+		if (hex.length() % 2 != 0) {
+			throw new IllegalArgumentException("Invalid hex string");
+		}
+
+		byte[] bytes = new byte[hex.length() / 2];
+
+		for (int i = 0; i < bytes.length; i++) {
+			bytes[i] = (byte) Integer.parseInt(
+				hex.substring(2 * i, 2 * i + 2),
+				16
+			);
+		}
+
+		return bytes;
+	}    
+
 }
