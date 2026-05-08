@@ -78,9 +78,41 @@ class hjUDPproxy {
         }
 
         String movie_selected = scanner.nextLine();
+        String ciphersuite_selected = "";
+
+        switch (movie_selected) {
+            case "cars":
+                System.out.println("Select one ciphersuite from the following list: ");
+                System.out.println("1 - " + "AES/CTR/NoPadding");
+                System.out.println("2 - " + "AES/CBC/PKCS5Padding");
+
+                ciphersuite_selected = scanner.nextLine();
+                if (ciphersuite_selected.equals("1"))
+                    ciphersuite_selected = "AES/CTR/NoPadding";
+                else if (ciphersuite_selected.equals("2"))
+                    ciphersuite_selected = "AES/CBC/PKCS5Padding";
+                else 
+                    System.out.println("Ciphersuite selection failed.");
+                    
+                break;
+            case "monsters":
+                System.out.println("Select one ciphersuite from the following list: ");
+                System.out.println("1 - " + "ChaCha20-Poly1305");
+                System.out.println("2 - " + "AES/GCM/NoPadding");
+
+                ciphersuite_selected = scanner.nextLine();
+                if (ciphersuite_selected.equals("1"))
+                    ciphersuite_selected = "ChaCha20-Poly1305";
+                else if (ciphersuite_selected.equals("2"))
+                    ciphersuite_selected = "AES/GCM/NoPadding";
+                else 
+                    System.out.println("Ciphersuite selection failed.");
+                break;
+        }
         scanner.close();
 
-        byte[] data = movie_selected.getBytes();
+        String info = movie_selected + "," + ciphersuite_selected;
+        byte[] data = info.getBytes();
 
         DatagramPacket packet = new DatagramPacket(data, data.length, serverSocketAddress);
 

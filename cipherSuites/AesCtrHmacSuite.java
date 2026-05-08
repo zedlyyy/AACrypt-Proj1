@@ -1,15 +1,21 @@
 package cipherSuites;
 
-public class AesCtrHmacSuite {
+import javax.crypto.SecretKey;
+
+public class AesCtrHmacSuite implements Ciphersuite {
 
     public AesCtrHmacSuite() {}
 
-    byte[] encrypt(byte[] plain_text){
-        return null;
+    @Override
+    public byte[] encrypt(byte[] data, SecretKey movieKey) throws Exception {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'encrypt'");
     }
 
-    byte[] decrypt(byte[] encrypted_text){
-        return null;
+    @Override
+    public byte[] decrypt(byte[] data, SecretKey movieKey) throws Exception {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'decrypt'");
     }
     
 }
