@@ -31,6 +31,15 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
+
+import cipherSuites.AesCbcHmacSuite;
+import cipherSuites.AesCtrHmacSuite;
+import cipherSuites.AesGcmSuite;
+import cipherSuites.ChaCha20Poly1305Suite;
+import cipherSuites.Ciphersuite;
+
 class hjUDPproxy {
 
     private static final int MAX_PACKET_SIZE = 8192;
@@ -38,13 +47,12 @@ class hjUDPproxy {
 	private static final byte DATA_TYPE		= 2; 
 	private static final byte END_TYPE		= 3;
     private static final byte ERROR_TYPE	= 4;
-    private static final int IV_SIZE		= 16;
 
 
     //@SuppressWarnings("unused")
     public static void main(String[] args) throws Exception {
-        InputStream config          = new FileInputStream("config.properties");
-        InputStream crypto_config   = new FileInputStream("../cryptoconfig.properties");
+        InputStream config          = new FileInputStream("UDPproxy/config.properties");
+        InputStream crypto_config   = new FileInputStream("cryptoconfig.properties");
         Scanner scanner = new Scanner(System.in);
         
         if (config == null || crypto_config == null) {
@@ -65,12 +73,12 @@ class hjUDPproxy {
 
         SocketAddress serverSocketAddress = parseSocketAddress(remote);
 
-        selectMovie(scanner, films_list, serverSocketAddress);
-        movieTransmissionToLocal(proxy, destination);
+        String movieAndCiphersuite = selectMovieAndCipherSuite(scanner, films_list, serverSocketAddress);
+        movieTransmissionToLocal(proxy, destination, movieAndCiphersuite, cryptoconfig_properties);
 
     }
 
-    private static void selectMovie(Scanner scanner, String[] films_list, SocketAddress serverSocketAddress) throws IOException {
+    private static String selectMovieAndCipherSuite(Scanner scanner, String[] films_list, SocketAddress serverSocketAddress) throws IOException {
         System.out.println("Select one movie from the following list: ");
         
         for (String movie : films_list){
@@ -81,7 +89,7 @@ class hjUDPproxy {
         String ciphersuite_selected = "";
 
         switch (movie_selected) {
-            case "cars":
+            case "cars.dat":
                 System.out.println("Select one ciphersuite from the following list: ");
                 System.out.println("1 - " + "AES/CTR/NoPadding");
                 System.out.println("2 - " + "AES/CBC/PKCS5Padding");
@@ -95,7 +103,7 @@ class hjUDPproxy {
                     System.out.println("Ciphersuite selection failed.");
                     
                 break;
-            case "monsters":
+            case "monsters.dat":
                 System.out.println("Select one ciphersuite from the following list: ");
                 System.out.println("1 - " + "ChaCha20-Poly1305");
                 System.out.println("2 - " + "AES/GCM/NoPadding");
@@ -108,6 +116,9 @@ class hjUDPproxy {
                 else 
                     System.out.println("Ciphersuite selection failed.");
                 break;
+            default:
+                System.out.println("MOVIE NOT AVAILABLE");
+                System.exit(1);
         }
         scanner.close();
 
@@ -120,6 +131,8 @@ class hjUDPproxy {
         s.send(packet);
 
         s.close();
+
+        return info;
     }
 
     private static InetSocketAddress parseSocketAddress(String socketAddress) 
@@ -130,7 +143,7 @@ class hjUDPproxy {
         return new InetSocketAddress(host, port);
     }
 
-    private static void movieTransmissionToLocal(String proxy, String destination) throws IOException {
+    private static void movieTransmissionToLocal(String proxy, String destination, String movieAndCiphersuite, Properties cryptoconfig_properties) throws Exception {
 
         SocketAddress inSocketAddress = parseSocketAddress(proxy);
         Set<SocketAddress> outSocketAddressSet = Arrays.stream(destination.split(",")).map(s -> parseSocketAddress(s)).collect(Collectors.toSet());
@@ -159,7 +172,7 @@ class hjUDPproxy {
                     System.out.println("> Starting streaming now !");
                     break;
                 case DATA_TYPE:
-                    sendFrame(payload, outSocketAddressSet, outSocket);
+                    sendFrame(payload, outSocketAddressSet, outSocket, movieAndCiphersuite, cryptoconfig_properties);
                     break;
                 case END_TYPE:
                     streaming = false;
@@ -176,10 +189,54 @@ class hjUDPproxy {
         }
     }
 
-    private static void sendFrame(byte[] payload, Set<SocketAddress> outSocketAddressSet, DatagramSocket outSocket) throws IOException {
+    private static void sendFrame(byte[] payload, Set<SocketAddress> outSocketAddressSet, DatagramSocket outSocket, String movieAndCiphersuite, Properties cryptoconfig_properties) throws Exception {
         System.out.print(".");
+
+        Ciphersuite cipher = null;
+		String cipherNum = "0";
+		String movieKey = "";
+
+        String[] info = movieAndCiphersuite.split(",");
+        String movie_selected = info[0];
+        String ciphersuite_selected = info[1];
+
+		switch (ciphersuite_selected) {
+			case "AES/CTR/NoPadding":
+				cipher = new AesCtrHmacSuite();
+				cipherNum = "1";
+				break;
+			case "AES/CBC/PKCS5Padding":
+				cipher = new AesCbcHmacSuite();
+				cipherNum = "2";
+				break;
+			case "ChaCha20-Poly1305":
+				cipher = new ChaCha20Poly1305Suite();
+				cipherNum = "1";
+				break;
+			case "AES/GCM/NoPadding":
+				cipher = new AesGcmSuite();
+				cipherNum = "2";
+				break;
+			default:
+				break;
+		}
+
+		if (ciphersuite_selected.contains("AES"))
+			movieKey = "AES";
+		else if (ciphersuite_selected.contains("ChaCha20"))
+			movieKey = "ChaCha20";
+		else
+			throw new IllegalArgumentException("Unsupported algorithm");
+
+		String keyHex = cryptoconfig_properties.getProperty(movie_selected + ".key" + cipherNum);
+		byte[] keyBytes = hexToBytes(keyHex);
+		SecretKey key = new SecretKeySpec(keyBytes, movieKey);
+
+		byte[] payload_decrypted = cipher.decrypt(payload, key);
+
+
         for (SocketAddress outSocketAddress : outSocketAddressSet) {
-              outSocket.send(new DatagramPacket(payload, payload.length, outSocketAddress));
+              outSocket.send(new DatagramPacket(payload_decrypted, payload_decrypted.length, outSocketAddress));
         }
     }
 

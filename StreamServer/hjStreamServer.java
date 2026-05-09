@@ -23,14 +23,13 @@ class hjStreamServer {
 
 	private static final int SERVER_PORT = 8888;
 	private static final int PROXY_PORT = 9999;
-	private static final String FILMS_FOLDER = "movies/";
+	private static final String FILMS_FOLDER = "StreamServer/movies/";
 	private static final byte PROTOCOL_VERSION = 1;
 	private static final int HEADER_SIZE = 6;
 	private static final byte START_TYPE = 1;
 	private static final byte DATA_TYPE = 2;
 	private static final byte END_TYPE = 3;
 	private static final byte ERROR_TYPE = 4;
-	private static final int IV_SIZE = 16;
 
 	static public void main(String[] args) throws Exception {
 		if (args.length != 1) {
@@ -40,12 +39,13 @@ class hjStreamServer {
 		}
 
 		String hostname = args[0];
-		InputStream crypto_config = new FileInputStream("../cryptoconfig.properties");
+		InputStream crypto_config = new FileInputStream("cryptoconfig.properties");
 
 		Properties cryptoconfig_properties = new Properties();
 		cryptoconfig_properties.load(crypto_config);
 
-		String[] info = receiveMovie();
+		String[] info = initialInfo();
+
 		String movie_selected = info[0];
 		String ciphersuite_selected = info[1];
 		startTransmission(movie_selected, ciphersuite_selected, hostname, PROXY_PORT, cryptoconfig_properties);
@@ -68,7 +68,7 @@ class hjStreamServer {
 	}
 
 	// Method to receive the movie name from the proxy
-	private static String[] receiveMovie() throws IOException {
+	private static String[] initialInfo() throws IOException {
 
 		DatagramSocket s = new DatagramSocket(SERVER_PORT);
 		byte[] buffer = new byte[1024];
@@ -82,8 +82,6 @@ class hjStreamServer {
 		String[] info = new String(packet.getData(), 0, packet.getLength()).trim().split(",");
 
 		s.close();
-
-		//String movie_file_path = FILMS_FOLDER + movie_name;
 
 		return info;
 	}
@@ -153,16 +151,6 @@ class hjStreamServer {
 
 		InetSocketAddress addr = new InetSocketAddress(hostname, port);
 
-		// COULD HAVE NULL PAYLOADS (FOR NOW)
-		// if(payload_size > 0 && payload != null){
-		// byte[] payload_encrypted = payloadEncryption(payload);
-		// bb.put(payload, 0, payload_size);
-		// }
-
-		// START AND END MESSAGES NOT INCLUDED (YET)
-		// RIGHT NOW THEY HAVE NULL PAYLOADS WHICH RESULTS IN AN EXCEPTION
-
-		//byte[] true_payload = Arrays.copyOf(payload, payload_size);
 		byte[] true_payload;
 
 		if (payload == null)
@@ -231,8 +219,6 @@ class hjStreamServer {
 		SecretKey key = new SecretKeySpec(keyBytes, movieKey);
 
 		return cipher.encrypt(payload, key);
-		// throw new UnsupportedOperationException("Unimplemented method
-		// 'payloadEncryption'");
 	}
 
 	private static void endTransmission(String movie, String ciphersuite, String hostname, int proxyPort,
