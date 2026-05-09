@@ -130,7 +130,7 @@ class hjStreamServer {
 			long tend = System.nanoTime();
 
 			System.out.println();
-			System.out.println("DONE! all frames sent: " + count);
+			System.out.println("DONE! \nTotal frames sent: " + count);
 
 			long duration = (tend - t0) / 1000000000;
 

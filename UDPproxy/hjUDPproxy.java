@@ -177,7 +177,7 @@ class hjUDPproxy {
                 case END_TYPE:
                     streaming = false;
                     inSocket.close();
-                    System.out.println("> Stream has ended !");
+                    System.out.println("\n> Stream has ended !");
                     break;  
                 case ERROR_TYPE:
                     System.out.println("AN ERROR HAS OCCURRED !");    
