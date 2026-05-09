@@ -173,13 +173,6 @@ class hjStreamServer {
 		return new DatagramPacket(packet_buffer, packet_buffer.length, addr);
 	}
 
-	// Vamos ter que talvez perguntar ao user que tipo the cipher suite quer usar
-	// para a stream, algo do tipo:
-	// "Que ciphersuite quer utilizar (escolha um número)?""
-	// > 1 - AES/CTR/NoPadding
-	// > 2 - AES/CBC/PKCS5Padding
-	// Só vão exister duas opções pois cada filme só tem duas ciphersuites
-	// diferentes.
 	private static byte[] payloadEncryption(byte[] payload, Properties cryptoconfig_properties, String movie, String ciphersuite_selected)
 			throws Exception {
 		Ciphersuite cipher = null;
