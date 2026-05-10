@@ -1,20 +1,52 @@
 package cipherSuites;
 
+import java.io.ByteArrayOutputStream;
+import java.security.SecureRandom;
+import java.util.Arrays;
+
+import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
+import javax.crypto.spec.IvParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
 
 public class ChaCha20Poly1305Suite implements Ciphersuite {
     
+    private static final int NONCE_SIZE = 12;
+
     public ChaCha20Poly1305Suite() {}
     
 
-    public byte[] encrypt(byte[] data, SecretKey movieKey) throws Exception {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'encrypt'");
+    public byte[] encrypt(byte[] data, SecretKey passwordKey) throws Exception {
+        SecretKeySpec key = new SecretKeySpec(passwordKey.getEncoded(), "ChaCha20-Poly1305");
+
+        byte[] nonce = new byte[NONCE_SIZE];
+        new SecureRandom().nextBytes(nonce);
+
+        IvParameterSpec param = new IvParameterSpec(nonce);
+        Cipher cipher = Cipher.getInstance("ChaCha20-Poly1305");
+        cipher.init(Cipher.ENCRYPT_MODE, key, param);
+
+        byte[] cipherText = cipher.doFinal(data);
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write(nonce);
+        output.write(cipherText);
+
+        return output.toByteArray();
     }
 
-    public byte[] decrypt(byte[] data, SecretKey movieKey) throws Exception {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'decrypt'");
+    public byte[] decrypt(byte[] data, SecretKey passwordKey) throws Exception {
+        if (data.length < NONCE_SIZE)
+            throw new IllegalArgumentException("Encrypted data too short");
+
+        byte[] nonce = Arrays.copyOfRange(data, 0, NONCE_SIZE);
+        byte[] cipherText = Arrays.copyOfRange(data, NONCE_SIZE, data.length);
+
+        IvParameterSpec param = new IvParameterSpec(nonce);
+        Cipher cipher = Cipher.getInstance("ChaCha20-Poly1305");
+        cipher.init(Cipher.DECRYPT_MODE, passwordKey, param);
+
+        return cipher.doFinal(cipherText);
     }
     
 }

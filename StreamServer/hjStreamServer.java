@@ -173,20 +173,30 @@ class hjStreamServer {
 		return new DatagramPacket(packet_buffer, packet_buffer.length, addr);
 	}
 
-	private static byte[] payloadEncryption(byte[] payload, Properties cryptoconfig_properties, String movie, String ciphersuite_selected)
+	private static byte[] payloadEncryption(byte[] payload, Properties cryptoconfig_properties, String movie,
+			String ciphersuite_selected)
 			throws Exception {
 		Ciphersuite cipher = null;
 		String cipherNum = "0";
 		String movieKey = "";
+		String keyHex = "";
+		byte[] keyBytes = null;
+		SecretKey macKey = null;
 
 		switch (ciphersuite_selected) {
 			case "AES/CTR/NoPadding":
-				cipher = new AesCtrHmacSuite();
 				cipherNum = "1";
+				keyHex = cryptoconfig_properties.getProperty(movie + ".mackey" + cipherNum);
+				keyBytes = hexToBytes(keyHex);
+				macKey = new SecretKeySpec(keyBytes, movieKey);
+				cipher = new AesCtrHmacSuite(macKey);
 				break;
 			case "AES/CBC/PKCS5Padding":
-				cipher = new AesCbcHmacSuite();
 				cipherNum = "2";
+				keyHex = cryptoconfig_properties.getProperty(movie + ".mackey" + cipherNum);
+				keyBytes = hexToBytes(keyHex);
+				macKey = new SecretKeySpec(keyBytes, movieKey);
+				cipher = new AesCbcHmacSuite(macKey);
 				break;
 			case "ChaCha20-Poly1305":
 				cipher = new ChaCha20Poly1305Suite();
@@ -207,8 +217,8 @@ class hjStreamServer {
 		else
 			throw new IllegalArgumentException("Unsupported algorithm");
 
-		String keyHex = cryptoconfig_properties.getProperty(movie + ".key" + cipherNum);
-		byte[] keyBytes = hexToBytes(keyHex);
+		keyHex = cryptoconfig_properties.getProperty(movie + ".key" + cipherNum);
+		keyBytes = hexToBytes(keyHex);
 		SecretKey key = new SecretKeySpec(keyBytes, movieKey);
 
 		return cipher.encrypt(payload, key);
@@ -226,7 +236,8 @@ class hjStreamServer {
 		s.close();
 	}
 
-	private static void internalError(String hostname, int proxyPort, String movie, String ciphersuite, Properties cryptoconfig_properties)
+	private static void internalError(String hostname, int proxyPort, String movie, String ciphersuite,
+			Properties cryptoconfig_properties)
 			throws Exception {
 
 		DatagramPacket packet = buildRTSSPPacket(ERROR_TYPE, 0, hostname, proxyPort, null, cryptoconfig_properties,
