@@ -25,7 +25,7 @@ class hjStreamServer {
 	private static final int PROXY_PORT = 9999;
 	private static final String FILMS_FOLDER = "StreamServer/movies/";
 	private static final byte PROTOCOL_VERSION = 1;
-	private static final int HEADER_SIZE = 6;
+	private static final int HEADER_SIZE = 14;
 	private static final byte START_TYPE = 1;
 	private static final byte DATA_TYPE = 2;
 	private static final byte END_TYPE = 3;
@@ -58,7 +58,7 @@ class hjStreamServer {
 			Properties cryptoconfig_properties) throws Exception {
 
 		DatagramPacket packet = buildRTSSPPacket(START_TYPE, 0, hostname, proxyPort, null, cryptoconfig_properties,
-				movie, ciphersuite);
+				movie, ciphersuite, 0);
 
 		DatagramSocket s = new DatagramSocket();
 		s.send(packet);
@@ -101,11 +101,13 @@ class hjStreamServer {
 				DatagramSocket s = new DatagramSocket()) {
 			long t0 = System.nanoTime();
 			long q0 = 0;
+			long seqNum = 0;
 
 			while (g.available() > 0) {
 
 				size = g.readShort();
 				csize = csize + size;
+				seqNum++;
 
 				time = g.readLong();
 
@@ -116,7 +118,7 @@ class hjStreamServer {
 				g.readFully(frame_buffer, 0, size);
 
 				DatagramPacket p = buildRTSSPPacket(DATA_TYPE, size, hostname, proxy_port, frame_buffer,
-						cryptoconfig_properties, movie, ciphersuite);
+						cryptoconfig_properties, movie, ciphersuite, seqNum);
 
 				long t = System.nanoTime();
 
@@ -147,7 +149,7 @@ class hjStreamServer {
 	}
 
 	private static DatagramPacket buildRTSSPPacket(byte data_type, int payload_size, String hostname, int port,
-			byte[] payload, Properties cryptoconfig_properties, String movie, String ciphersuite) throws Exception {
+			byte[] payload, Properties cryptoconfig_properties, String movie, String ciphersuite, long seqNum) throws Exception {
 
 		InetSocketAddress addr = new InetSocketAddress(hostname, port);
 
@@ -158,13 +160,14 @@ class hjStreamServer {
 		else
 			true_payload = Arrays.copyOf(payload, payload_size);
 
-		byte[] encrypted_payload = payloadEncryption(true_payload, cryptoconfig_properties, movie, ciphersuite);
+		byte[] encrypted_payload = payloadEncryption(true_payload, cryptoconfig_properties, movie, ciphersuite, seqNum);
 		ByteBuffer bb = ByteBuffer.allocate(HEADER_SIZE + encrypted_payload.length);
 		int encrypted_payload_size = encrypted_payload.length;
 
 		// HEADER CONTENT
 		bb.put(data_type);
 		bb.put(PROTOCOL_VERSION);
+		bb.putLong(seqNum);
 		bb.putInt(encrypted_payload_size);
 		bb.put(encrypted_payload, 0, encrypted_payload_size);
 
@@ -174,7 +177,7 @@ class hjStreamServer {
 	}
 
 	private static byte[] payloadEncryption(byte[] payload, Properties cryptoconfig_properties, String movie,
-			String ciphersuite_selected)
+			String ciphersuite_selected, long seqNum)
 			throws Exception {
 		Ciphersuite cipher = null;
 		String cipherNum = "0";
@@ -188,14 +191,14 @@ class hjStreamServer {
 				cipherNum = "1";
 				keyHex = cryptoconfig_properties.getProperty(movie + ".mackey" + cipherNum);
 				keyBytes = hexToBytes(keyHex);
-				macKey = new SecretKeySpec(keyBytes, movieKey);
+				macKey = new SecretKeySpec(keyBytes, "HmacSHA256");
 				cipher = new AesCtrHmacSuite(macKey);
 				break;
 			case "AES/CBC/PKCS5Padding":
 				cipherNum = "2";
 				keyHex = cryptoconfig_properties.getProperty(movie + ".mackey" + cipherNum);
 				keyBytes = hexToBytes(keyHex);
-				macKey = new SecretKeySpec(keyBytes, movieKey);
+				macKey = new SecretKeySpec(keyBytes, "HmacSHA256");
 				cipher = new AesCbcHmacSuite(macKey);
 				break;
 			case "ChaCha20-Poly1305":
@@ -221,14 +224,14 @@ class hjStreamServer {
 		keyBytes = hexToBytes(keyHex);
 		SecretKey key = new SecretKeySpec(keyBytes, movieKey);
 
-		return cipher.encrypt(payload, key);
+		return cipher.encrypt(payload, key, seqNum);
 	}
 
 	private static void endTransmission(String movie, String ciphersuite, String hostname, int proxyPort,
 			Properties cryptoconfig_properties) throws Exception {
 
 		DatagramPacket packet = buildRTSSPPacket(END_TYPE, 0, hostname, proxyPort, null, cryptoconfig_properties,
-				movie, ciphersuite);
+				movie, ciphersuite, 0);
 
 		DatagramSocket s = new DatagramSocket();
 		s.send(packet);
@@ -241,7 +244,7 @@ class hjStreamServer {
 			throws Exception {
 
 		DatagramPacket packet = buildRTSSPPacket(ERROR_TYPE, 0, hostname, proxyPort, null, cryptoconfig_properties,
-				movie, ciphersuite);
+				movie, ciphersuite, -1);
 
 		DatagramSocket s = new DatagramSocket();
 		s.send(packet);

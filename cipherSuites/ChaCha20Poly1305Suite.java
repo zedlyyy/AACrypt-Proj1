@@ -1,6 +1,7 @@
 package cipherSuites;
 
 import java.io.ByteArrayOutputStream;
+import java.nio.ByteBuffer;
 import java.security.SecureRandom;
 import java.util.Arrays;
 
@@ -16,7 +17,7 @@ public class ChaCha20Poly1305Suite implements Ciphersuite {
     public ChaCha20Poly1305Suite() {}
     
 
-    public byte[] encrypt(byte[] data, SecretKey passwordKey) throws Exception {
+    public byte[] encrypt(byte[] data, SecretKey passwordKey, long seqNum) throws Exception {
         SecretKeySpec key = new SecretKeySpec(passwordKey.getEncoded(), "ChaCha20-Poly1305");
 
         byte[] nonce = new byte[NONCE_SIZE];
@@ -25,6 +26,10 @@ public class ChaCha20Poly1305Suite implements Ciphersuite {
         IvParameterSpec param = new IvParameterSpec(nonce);
         Cipher cipher = Cipher.getInstance("ChaCha20-Poly1305");
         cipher.init(Cipher.ENCRYPT_MODE, key, param);
+
+        byte[] seqBytes = ByteBuffer.allocate(8).putLong(seqNum).array();
+
+        cipher.updateAAD(seqBytes);
 
         byte[] cipherText = cipher.doFinal(data);
 
@@ -35,7 +40,7 @@ public class ChaCha20Poly1305Suite implements Ciphersuite {
         return output.toByteArray();
     }
 
-    public byte[] decrypt(byte[] data, SecretKey passwordKey) throws Exception {
+    public byte[] decrypt(byte[] data, SecretKey passwordKey, long seqNum) throws Exception {
         if (data.length < NONCE_SIZE)
             throw new IllegalArgumentException("Encrypted data too short");
 
@@ -45,6 +50,10 @@ public class ChaCha20Poly1305Suite implements Ciphersuite {
         IvParameterSpec param = new IvParameterSpec(nonce);
         Cipher cipher = Cipher.getInstance("ChaCha20-Poly1305");
         cipher.init(Cipher.DECRYPT_MODE, passwordKey, param);
+
+        byte[] seqBytes = ByteBuffer.allocate(8).putLong(seqNum).array();
+
+        cipher.updateAAD(seqBytes);
 
         return cipher.doFinal(cipherText);
     }

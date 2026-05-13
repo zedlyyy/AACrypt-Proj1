@@ -20,7 +20,7 @@ public class AesCtrHmacSuite implements Ciphersuite {
         this.macKey = macKey;
     }
 
-    public byte[] encrypt(byte[] data, SecretKey passwordKey) throws Exception {
+    public byte[] encrypt(byte[] data, SecretKey passwordKey, long seqNum) throws Exception {
         SecretKeySpec cipherKey = new SecretKeySpec(passwordKey.getEncoded(), "AES");
 
         byte[] iv = new byte[16];
@@ -32,8 +32,11 @@ public class AesCtrHmacSuite implements Ciphersuite {
 
         byte[] cipherText = cipher.doFinal(data);
 
+        byte[] seqBytes = ByteBuffer.allocate(8).putLong(seqNum).array();
+
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(macKey);
+        mac.update(seqBytes);
         mac.update(iv);
         mac.update(cipherText);
         byte[] macResult = mac.doFinal();
@@ -46,7 +49,7 @@ public class AesCtrHmacSuite implements Ciphersuite {
         return buffer.array();
     }
 
-    public byte[] decrypt(byte[] encryptedData, SecretKey passwordKey) throws Exception {
+    public byte[] decrypt(byte[] encryptedData, SecretKey passwordKey, long seqNum) throws Exception {
         ByteBuffer byteBuffer = ByteBuffer.wrap(encryptedData);
 
         byte[] iv = new byte[16];
@@ -54,6 +57,9 @@ public class AesCtrHmacSuite implements Ciphersuite {
         int macLength = 32;
         if (encryptedData.length < 16 + macLength)
             throw new IllegalArgumentException("Encrypted packet too short");
+
+        byte[] seqBytes = ByteBuffer.allocate(8).putLong(seqNum).array();
+
         byte[] cipherText = new byte[byteBuffer.remaining() - macLength];
         byteBuffer.get(cipherText);
 
@@ -62,6 +68,7 @@ public class AesCtrHmacSuite implements Ciphersuite {
 
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(macKey);
+        mac.update(seqBytes);
         mac.update(iv);
         mac.update(cipherText);
         byte[] macResult = mac.doFinal();

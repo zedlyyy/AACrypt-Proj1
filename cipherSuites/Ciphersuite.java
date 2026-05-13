@@ -4,7 +4,7 @@ import javax.crypto.SecretKey;
 
 public interface Ciphersuite {
     
-    public byte[] encrypt(byte[] data, SecretKey movieKey) throws Exception;
+    public byte[] encrypt(byte[] data, SecretKey movieKey, long seqNum) throws Exception;
 
-    public byte[] decrypt(byte[] data, SecretKey movieKey) throws Exception;
+    public byte[] decrypt(byte[] data, SecretKey movieKey, long seqNum) throws Exception;
 }

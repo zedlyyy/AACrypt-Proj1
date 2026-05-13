@@ -153,6 +153,8 @@ class hjUDPproxy {
         DatagramSocket outSocket = new DatagramSocket();
         byte[] in_packet_buffer = new byte[MAX_PACKET_SIZE];
 
+        long lastSeq = -1;
+
         boolean streaming = true;
         while (streaming) {
             DatagramPacket inPacket = new DatagramPacket(in_packet_buffer, in_packet_buffer.length);
@@ -162,6 +164,7 @@ class hjUDPproxy {
 
             byte type = bb.get();
             byte version = bb.get();
+            long seqNum = bb.getLong();
             int length = bb.getInt();
 
             byte[] payload = new byte[length];
@@ -173,7 +176,14 @@ class hjUDPproxy {
                     System.out.println("> Starting streaming now !");
                     break;
                 case DATA_TYPE:
-                    sendFrame(payload, outSocketAddressSet, outSocket, movieAndCiphersuite, cryptoconfig_properties);
+                    if (seqNum <= lastSeq) {
+                        System.out.println("Packet was discarded.");
+                        break;
+                    }
+
+                    lastSeq = seqNum;
+
+                    sendFrame(payload, outSocketAddressSet, outSocket, movieAndCiphersuite, cryptoconfig_properties, seqNum);
                     break;
                 case END_TYPE:
                     streaming = false;
@@ -191,7 +201,8 @@ class hjUDPproxy {
     }
 
     private static void sendFrame(byte[] payload, Set<SocketAddress> outSocketAddressSet, DatagramSocket outSocket,
-            String movieAndCiphersuite, Properties cryptoconfig_properties) throws Exception {
+            String movieAndCiphersuite, Properties cryptoconfig_properties, long seqNum)
+            throws Exception {
         System.out.print(".");
 
         Ciphersuite cipher = null;
@@ -211,15 +222,15 @@ class hjUDPproxy {
                 cipherNum = "1";
                 keyHex = cryptoconfig_properties.getProperty(movie_selected + ".mackey" + cipherNum);
                 keyBytes = hexToBytes(keyHex);
-                macKey = new SecretKeySpec(keyBytes, movieKey);
+                macKey = new SecretKeySpec(keyBytes, "HmacSHA256");
                 cipher = new AesCtrHmacSuite(macKey);
                 break;
             case "AES/CBC/PKCS5Padding":
                 cipherNum = "2";
-				keyHex = cryptoconfig_properties.getProperty(movie_selected + ".mackey" + cipherNum);
-				keyBytes = hexToBytes(keyHex);
-				macKey = new SecretKeySpec(keyBytes, movieKey);
-				cipher = new AesCbcHmacSuite(macKey);
+                keyHex = cryptoconfig_properties.getProperty(movie_selected + ".mackey" + cipherNum);
+                keyBytes = hexToBytes(keyHex);
+                macKey = new SecretKeySpec(keyBytes, "HmacSHA256");
+                cipher = new AesCbcHmacSuite(macKey);
                 break;
             case "ChaCha20-Poly1305":
                 cipher = new ChaCha20Poly1305Suite();
@@ -244,7 +255,7 @@ class hjUDPproxy {
         keyBytes = hexToBytes(keyHex);
         SecretKey key = new SecretKeySpec(keyBytes, movieKey);
 
-        byte[] payload_decrypted = cipher.decrypt(payload, key);
+        byte[] payload_decrypted = cipher.decrypt(payload, key, seqNum);
 
         for (SocketAddress outSocketAddress : outSocketAddressSet) {
             outSocket.send(new DatagramPacket(payload_decrypted, payload_decrypted.length, outSocketAddress));
