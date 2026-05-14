@@ -41,6 +41,8 @@ class hjStreamServer {
 	private static final int PROXY_PORT = 9999;
 	private static final String FILMS_FOLDER = "StreamServer/movies/";
 	private static final String KEYSTORE_PATH = "part2/StreamServer/server-truststore.p12";
+	private static PrivateKey server_ECDH_PrivateKey;
+	private static byte[] server_nonce;
 	private static final byte PROTOCOL_VERSION = 1;
 	private static final int HEADER_SIZE = 14;
 	private static final byte START_TYPE = 1;
@@ -80,9 +82,50 @@ class hjStreamServer {
 		ClientHello ch = ClientHello.deserialize(client_message_byte);
 		clientHelloVerification(ch);
 		String cipher_selected = selectCiphersuite(ch.getCipherSuites(), scanner);
-
+		byte[] server_hello_message = buildServerHelloMessage(cipher_selected, ch);
+		sendServerHelloMessage(server_hello_message, s);
+		
+		
 		System.out.println("TODO");
 		return null;
+	}
+
+	private static void sendServerHelloMessage(byte[] server_hello_message, DatagramSocket s) {
+		// TODO Auto-generated method stub
+		throw new UnsupportedOperationException("Unimplemented method 'sendServerHelloMessage'");
+	}
+
+	private static byte[] buildServerHelloMessage(String cipher_selected, ClientHello ch) throws Exception {
+		
+		char[] key_store_pass = "pedrodiogo".toCharArray();
+		String alias = "server";
+
+		KeyStore server_key_store = loadKeyStore("part2/StreamServer/server-keystore.p12", "pedrodiogo".toCharArray());
+
+		PrivateKey server_private_key = loadPrivateKey(server_key_store, alias, key_store_pass);
+
+		byte[] server_certificate = loadCertificateBytes(server_key_store, alias);
+
+		KeyPair ECDH_key_pair = CryptoUtils.generateECDHKeyPair();
+        server_ECDH_PrivateKey = ECDH_key_pair.getPrivate();
+
+		byte[] encoded_ECDH_public_key = ECDH_key_pair.getPublic().getEncoded();
+
+		byte[] nonce = generateNonce();
+        server_nonce = nonce;
+
+		byte[] client_nonce_response = computeNonceResponse(ch.getNonce());
+
+		ServerHello sh = new ServerHello(server_certificate, encoded_ECDH_public_key, null, server_nonce, client_nonce_response, cipher_selected);
+
+		byte[] dataToSign = sh.serializeData();
+		byte[] signature = CryptoUtils.sign(server_private_key, dataToSign);
+		sh.setSignature(signature);
+
+		byte[] server_hello_message = sh.serializeWithSignature();
+
+		return server_hello_message;
+
 	}
 
 	private static String selectCiphersuite(List<String> cipher_suites, Scanner scanner) {
@@ -366,6 +409,13 @@ class hjStreamServer {
 
     	return alias != null;
 	}
+
+	private static byte[] computeNonceResponse(
+        byte[] clientNonce) throws Exception {
+    	MessageDigest md = MessageDigest.getInstance("SHA-256");
+
+    return md.digest(clientNonce);
+}
 
 
 }

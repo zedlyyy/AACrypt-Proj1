@@ -58,7 +58,7 @@ class hjUDPproxy {
     private static final byte DATA_TYPE = 2;
     private static final byte END_TYPE = 3;
     private static final byte ERROR_TYPE = 4;
-    private static final String KEYSTORE_PATH = "part2/UDPproxy/proxy-keystore.p12";
+    private static final String KEYSTORE_PATH = "part2/UDPproxy/proxy-truststore.p12";
     private static PrivateKey client_ECDH_PrivateKey;
     private static byte[] client_nonce;
 
