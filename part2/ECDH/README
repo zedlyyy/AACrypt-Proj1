@@ -1,0 +1,16 @@
+
+Client/Server Diffie Hellman Agreement using
+Elliptic Curves and ECDSA Signatures
+
+
+Both client & server have:
+Long-term ECDSA key pairs (identity keys)
+
+During handshake:
+Each side generates ephemeral ECDH keys
+
+Exchanges public keys + ECDSA signatures
+
+Verifies signatures
+
+Computes shared secret via ECDH

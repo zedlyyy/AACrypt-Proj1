@@ -29,18 +29,27 @@ import java.net.InetAddress;
 import java.net.SocketAddress;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.security.KeyPair;
+import java.security.KeyStore;
+import java.security.PrivateKey;
+import java.security.SecureRandom;
+import java.security.cert.Certificate;
+import java.io.FileInputStream;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
-import part1.cipherSuites.AesCbcHmacSuite;
-import part1.cipherSuites.AesCtrHmacSuite;
-import part1.cipherSuites.AesGcmSuite;
-import part1.cipherSuites.ChaCha20Poly1305Suite;
-import part1.cipherSuites.Ciphersuite;
+import part2.SHPmessages.*;
+import part2.ECDH.*;
+import part2.cipherSuites.AesCbcHmacSuite;
+import part2.cipherSuites.AesCtrHmacSuite;
+import part2.cipherSuites.AesGcmSuite;
+import part2.cipherSuites.ChaCha20Poly1305Suite;
+import part2.cipherSuites.Ciphersuite;
 
 class hjUDPproxy {
 
@@ -49,22 +58,21 @@ class hjUDPproxy {
     private static final byte DATA_TYPE = 2;
     private static final byte END_TYPE = 3;
     private static final byte ERROR_TYPE = 4;
+    private static final String KEYSTORE_PATH = "part2/UDPproxy/proxy-keystore.p12";
+    private static PrivateKey client_ECDH_PrivateKey;
+    private static byte[] client_nonce;
 
     // @SuppressWarnings("unused")
     public static void main(String[] args) throws Exception {
-        InputStream config = new FileInputStream("UDPproxy/config.properties");
-        InputStream crypto_config = new FileInputStream("cryptoconfig.properties");
+        InputStream config = new FileInputStream("part2/UDPproxy/config.properties");
+        //InputStream crypto_config = new FileInputStream("cryptoconfig.properties");
         Scanner scanner = new Scanner(System.in);
 
-        if (config == null || crypto_config == null) {
-            System.err.println("Configuration file not found!");
-            System.exit(1);
-        }
-
         Properties config_properties = new Properties();
-        Properties cryptoconfig_properties = new Properties();
+        //Properties cryptoconfig_properties = new Properties();
         config_properties.load(config);
-        cryptoconfig_properties.load(crypto_config);
+        //cryptoconfig_properties.load(crypto_config);
+
         String remote = config_properties.getProperty("remote");
         String proxy = config_properties.getProperty("proxy");
         String destination = config_properties.getProperty("localdelivery");
@@ -74,12 +82,77 @@ class hjUDPproxy {
 
         SocketAddress serverSocketAddress = parseSocketAddress(remote);
 
-        String movieAndCiphersuite = selectMovieAndCipherSuite(scanner, films_list, serverSocketAddress);
-        movieTransmissionToLocal(proxy, destination, movieAndCiphersuite, cryptoconfig_properties);
+        String movie = selectMovie(scanner, films_list, serverSocketAddress);
+        String ciphersuite_selected = startSHPclient(movie, serverSocketAddress);
+        movieTransmissionToLocal(proxy, destination, movie, ciphersuite_selected);
 
     }
 
-    private static String selectMovieAndCipherSuite(Scanner scanner, String[] films_list,
+    private static String startSHPclient(String movie, SocketAddress serverSocketAddress) throws Exception {
+        
+        byte[] client_hello_messsage = buildClientHelloMessage(movie);
+        sendSHPclientHelloMessage(client_hello_messsage, serverSocketAddress); 
+        
+        return null;
+    }
+
+    private static void sendSHPclientHelloMessage(byte[] client_hello_messsage, SocketAddress serverSocketAddress) throws IOException {
+        
+        try (DatagramSocket socket = new DatagramSocket()) {
+
+            DatagramPacket packet = new DatagramPacket(client_hello_messsage, client_hello_messsage.length, serverSocketAddress);
+            socket.send(packet);
+        }
+    }
+
+    private static byte[] buildClientHelloMessage(String movie) throws Exception {
+
+        char[] key_store_pass = "pedrodiogo".toCharArray();
+        String alias = "proxy";
+
+        KeyStore proxy_key_store = loadKeyStore(KEYSTORE_PATH, key_store_pass);
+
+        PrivateKey proxy_private_key = loadPrivateKey(proxy_key_store, alias, key_store_pass); 
+
+        byte[] proxy_certificate = loadCertificateBytes(proxy_key_store, alias);
+
+        KeyPair ECDH_key_pair = CryptoUtils.generateECDHKeyPair();
+        client_ECDH_PrivateKey = ECDH_key_pair.getPrivate();
+
+        byte[] encoded_ECDH_public_key = ECDH_key_pair.getPublic().getEncoded();
+
+        byte[] nonce = generateNonce();
+        client_nonce = nonce;
+
+
+        List<String> supported_cipher_suites = null;
+        switch (movie) {
+            case "cars.dat":
+                supported_cipher_suites = List.of("AES/CTR/NoPadding","AES/CBC/PKCS5Padding");
+                break;
+            case "monsters.dat":
+                supported_cipher_suites = List.of("ChaCha20-Poly1305","AES/GCM/NoPadding");
+                break;
+            default:
+                System.out.println("MOVIE NOT AVAILABLE");
+                System.exit(1);
+        }
+        
+
+        ClientHello ch = new ClientHello(movie, proxy_certificate, encoded_ECDH_public_key, null, nonce, supported_cipher_suites);
+
+        byte[] data_to_sign = ch.serializeData();
+
+        byte[] signature = CryptoUtils.sign(proxy_private_key, data_to_sign);
+
+        ch.setSignature(signature);
+
+        byte[] final_message = ch.serializeWithSignature();
+
+        return final_message;
+    }
+
+    private static String selectMovie(Scanner scanner, String[] films_list,
             SocketAddress serverSocketAddress) throws IOException {
         System.out.println("Select one movie from the following list: ");
 
@@ -88,53 +161,10 @@ class hjUDPproxy {
         }
 
         String movie_selected = scanner.nextLine();
-        String ciphersuite_selected = "";
-
-        switch (movie_selected) {
-            case "cars.dat":
-                System.out.println("Select one ciphersuite from the following list: ");
-                System.out.println("1 - " + "AES/CTR/NoPadding");
-                System.out.println("2 - " + "AES/CBC/PKCS5Padding");
-
-                ciphersuite_selected = scanner.nextLine();
-                if (ciphersuite_selected.equals("1"))
-                    ciphersuite_selected = "AES/CTR/NoPadding";
-                else if (ciphersuite_selected.equals("2"))
-                    ciphersuite_selected = "AES/CBC/PKCS5Padding";
-                else
-                    System.out.println("Ciphersuite selection failed.");
-
-                break;
-            case "monsters.dat":
-                System.out.println("Select one ciphersuite from the following list: ");
-                System.out.println("1 - " + "ChaCha20-Poly1305");
-                System.out.println("2 - " + "AES/GCM/NoPadding");
-
-                ciphersuite_selected = scanner.nextLine();
-                if (ciphersuite_selected.equals("1"))
-                    ciphersuite_selected = "ChaCha20-Poly1305";
-                else if (ciphersuite_selected.equals("2"))
-                    ciphersuite_selected = "AES/GCM/NoPadding";
-                else
-                    System.out.println("Ciphersuite selection failed.");
-                break;
-            default:
-                System.out.println("MOVIE NOT AVAILABLE");
-                System.exit(1);
-        }
+        
         scanner.close();
 
-        String info = movie_selected + "," + ciphersuite_selected;
-        byte[] data = info.getBytes();
-
-        DatagramPacket packet = new DatagramPacket(data, data.length, serverSocketAddress);
-
-        DatagramSocket s = new DatagramSocket();
-        s.send(packet);
-
-        s.close();
-
-        return info;
+        return movie_selected;
     }
 
     private static InetSocketAddress parseSocketAddress(String socketAddress) {
@@ -145,7 +175,7 @@ class hjUDPproxy {
     }
 
     private static void movieTransmissionToLocal(String proxy, String destination, String movieAndCiphersuite,
-            Properties cryptoconfig_properties) throws Exception {
+            String ciphersuite_selected) throws Exception {
 
         SocketAddress inSocketAddress = parseSocketAddress(proxy);
         Set<SocketAddress> outSocketAddressSet = Arrays.stream(destination.split(",")).map(s -> parseSocketAddress(s))
@@ -184,7 +214,7 @@ class hjUDPproxy {
                     }
 
                     lastSeq = seqNum;
-                    sendFrame(payload, outSocketAddressSet, outSocket, movieAndCiphersuite, cryptoconfig_properties, seqNum);
+                    sendFrame(payload, outSocketAddressSet, outSocket, movieAndCiphersuite, seqNum);
                     break;
                 case END_TYPE:
                     streaming = false;
@@ -202,7 +232,7 @@ class hjUDPproxy {
     }
 
     private static void sendFrame(byte[] payload, Set<SocketAddress> outSocketAddressSet, DatagramSocket outSocket,
-            String movieAndCiphersuite, Properties cryptoconfig_properties, long seqNum)
+            String movieAndCiphersuite, long seqNum)
             throws Exception {
         System.out.print(".");
 
@@ -221,14 +251,14 @@ class hjUDPproxy {
         switch (ciphersuite_selected) {
             case "AES/CTR/NoPadding":
                 cipherNum = "1";
-                keyHex = cryptoconfig_properties.getProperty(movie_selected + ".mackey" + cipherNum);
+                //keyHex = cryptoconfig_properties.getProperty(movie_selected + ".mackey" + cipherNum);
                 keyBytes = hexToBytes(keyHex);
                 macKey = new SecretKeySpec(keyBytes, "HmacSHA256");
                 cipher = new AesCtrHmacSuite(macKey);
                 break;
             case "AES/CBC/PKCS5Padding":
                 cipherNum = "2";
-                keyHex = cryptoconfig_properties.getProperty(movie_selected + ".mackey" + cipherNum);
+                //keyHex = cryptoconfig_properties.getProperty(movie_selected + ".mackey" + cipherNum);
                 keyBytes = hexToBytes(keyHex);
                 macKey = new SecretKeySpec(keyBytes, "HmacSHA256");
                 cipher = new AesCbcHmacSuite(macKey);
@@ -252,7 +282,7 @@ class hjUDPproxy {
         else
             throw new IllegalArgumentException("Unsupported algorithm");
 
-        keyHex = cryptoconfig_properties.getProperty(movie_selected + ".key" + cipherNum);
+        //keyHex = cryptoconfig_properties.getProperty(movie_selected + ".key" + cipherNum);
         keyBytes = hexToBytes(keyHex);
         SecretKey key = new SecretKeySpec(keyBytes, movieKey);
 
@@ -278,5 +308,38 @@ class hjUDPproxy {
 
         return bytes;
     }
+
+    private static KeyStore loadKeyStore(String path, char[] password) throws Exception {
+        KeyStore ks = KeyStore.getInstance("PKCS12");
+
+        try (FileInputStream fis = new FileInputStream(path)) {
+            ks.load(fis, password);
+        }   
+
+        return ks;
+    }
+
+    private static PrivateKey loadPrivateKey(KeyStore ks, String alias, char[] keyPassword) throws Exception {
+
+        return (PrivateKey) ks.getKey(alias, keyPassword);
+    }
+
+    private static byte[] loadCertificateBytes(KeyStore ks, String alias) throws Exception {
+
+        Certificate cert = ks.getCertificate(alias);
+
+        if (cert == null) {
+            throw new IllegalArgumentException("Certificate not found for alias: " + alias);
+        }
+
+        return cert.getEncoded();
+    }
+
+    private static byte[] generateNonce() {
+        byte[] nonce = new byte[32];
+        new SecureRandom().nextBytes(nonce);
+        return nonce;
+    }
+
 
 }

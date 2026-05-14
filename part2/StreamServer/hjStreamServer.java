@@ -10,23 +10,37 @@ import java.io.*;
 import java.net.*;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Enumeration;
+import java.util.List;
 import java.util.Properties;
-
-import javax.crypto.spec.SecretKeySpec;
-
-import part1.cipherSuites.AesCbcHmacSuite;
-import part1.cipherSuites.AesCtrHmacSuite;
-import part1.cipherSuites.AesGcmSuite;
-import part1.cipherSuites.ChaCha20Poly1305Suite;
-import part1.cipherSuites.Ciphersuite;
+import java.util.Scanner;
+import java.security.KeyPair;
+import java.security.KeyStore;
+import java.security.MessageDigest;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.security.SecureRandom;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateFactory;
 
 import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
+
+
+import part2.SHPmessages.*;
+import part2.ECDH.*;
+import part2.cipherSuites.AesCbcHmacSuite;
+import part2.cipherSuites.AesCtrHmacSuite;
+import part2.cipherSuites.AesGcmSuite;
+import part2.cipherSuites.ChaCha20Poly1305Suite;
+import part2.cipherSuites.Ciphersuite;
 
 class hjStreamServer {
 
 	private static final int SERVER_PORT = 8888;
 	private static final int PROXY_PORT = 9999;
 	private static final String FILMS_FOLDER = "StreamServer/movies/";
+	private static final String KEYSTORE_PATH = "part2/StreamServer/server-truststore.p12";
 	private static final byte PROTOCOL_VERSION = 1;
 	private static final int HEADER_SIZE = 14;
 	private static final byte START_TYPE = 1;
@@ -41,26 +55,94 @@ class hjStreamServer {
 			System.exit(-1);
 		}
 
+		Scanner scanner = new Scanner(System.in);
 		String hostname = args[0];
-		InputStream crypto_config = new FileInputStream("cryptoconfig.properties");
 
-		Properties cryptoconfig_properties = new Properties();
-		cryptoconfig_properties.load(crypto_config);
+		DatagramSocket s = new DatagramSocket(SERVER_PORT);
 
-		String[] info = initialInfo();
+		//String movie_selected = movieSelected(s);
 
-		String movie_selected = info[0];
-		String ciphersuite_selected = info[1];
-		startTransmission(movie_selected, ciphersuite_selected, hostname, PROXY_PORT, cryptoconfig_properties);
-		movieTransmissionToProxy(movie_selected, ciphersuite_selected, hostname, PROXY_PORT, cryptoconfig_properties);
-		endTransmission(movie_selected, ciphersuite_selected, hostname, PROXY_PORT, cryptoconfig_properties);
+		String[] ciphersuite_and_movie = startSHPserver(s, scanner);
+		
+		String ciphersuite_selected = ciphersuite_and_movie[0];
+		String movie_selected = ciphersuite_and_movie[1];
+
+		
+		startTransmission(movie_selected, ciphersuite_selected, hostname, PROXY_PORT);
+		movieTransmissionToProxy(movie_selected, ciphersuite_selected, hostname, PROXY_PORT);
+		endTransmission(movie_selected, ciphersuite_selected, hostname, PROXY_PORT);
 
 	}
 
-	private static void startTransmission(String movie, String ciphersuite, String hostname, int proxyPort,
-			Properties cryptoconfig_properties) throws Exception {
+	private static String[] startSHPserver(DatagramSocket s, Scanner scanner) throws Exception {
+		byte[] client_message_byte = receiveSHPclientHelloMessage(s);
 
-		DatagramPacket packet = buildRTSSPPacket(START_TYPE, 0, hostname, proxyPort, null, cryptoconfig_properties,
+		ClientHello ch = ClientHello.deserialize(client_message_byte);
+		clientHelloVerification(ch);
+		String cipher_selected = selectCiphersuite(ch.getCipherSuites(), scanner);
+
+		System.out.println("TODO");
+		return null;
+	}
+
+	private static String selectCiphersuite(List<String> cipher_suites, Scanner scanner) {
+		System.out.println("Select one Ciphersuite from the following list: ");
+
+        for (int i = 1; i <= cipher_suites.size(); i++) {
+            System.out.println(i + " - " + cipher_suites.get(i-1));
+        }
+
+        String choise_selected = scanner.nextLine();
+		String ciphersuite_selected = "";
+		if (choise_selected.equals("1"))
+                ciphersuite_selected = cipher_suites.get(0);
+            else if (ciphersuite_selected.equals("2"))
+                ciphersuite_selected = cipher_suites.get(1);
+            else
+                System.out.println("Ciphersuite selection failed.");
+		
+		return ciphersuite_selected;
+	}
+
+	private static void clientHelloVerification(ClientHello ch) throws Exception {
+		
+		CertificateFactory cf = CertificateFactory.getInstance("X.509");
+
+    	Certificate clientCert = cf.generateCertificate( new ByteArrayInputStream(ch.getCertificate()));
+
+		KeyStore serverTrustStore = loadKeyStore(KEYSTORE_PATH, "pedrodiogo".toCharArray());
+
+		if (!isCertificateTrusted(clientCert, serverTrustStore)) {
+        	throw new SecurityException("Client certificate is not trusted");
+    	}
+
+		PublicKey clientPublicKey = clientCert.getPublicKey();
+
+		boolean validSignature = CryptoUtils.verify(clientPublicKey, ch.serializeData(), ch.getSignature());
+
+		if (!validSignature) {
+        	throw new SecurityException("Invalid ClientHello signature");
+    	}
+
+		System.out.println("ClientHello accepted.");
+    	System.out.println("Requested movie: " + ch.getMovie_name());
+
+	}
+
+	private static byte[] receiveSHPclientHelloMessage(DatagramSocket s) throws IOException {
+		System.out.println("Waiting for proxy connection ...");
+		byte[] buffer = new byte[8192];
+
+    	DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+
+    	s.receive(packet);
+
+    	return Arrays.copyOfRange(packet.getData(), packet.getOffset(), packet.getOffset() + packet.getLength());
+	}
+
+	private static void startTransmission(String movie, String ciphersuite, String hostname, int proxyPort) throws Exception {
+
+		DatagramPacket packet = buildRTSSPPacket(START_TYPE, 0, hostname, proxyPort, null,
 				movie, ciphersuite, 0);
 
 		DatagramSocket s = new DatagramSocket();
@@ -70,27 +152,7 @@ class hjStreamServer {
 
 	}
 
-	// Method to receive the movie name from the proxy
-	private static String[] initialInfo() throws IOException {
-
-		DatagramSocket s = new DatagramSocket(SERVER_PORT);
-		byte[] buffer = new byte[1024];
-
-		DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
-
-		System.out.println("Waiting for movie request from proxy...");
-
-		s.receive(packet);
-
-		String[] info = new String(packet.getData(), 0, packet.getLength()).trim().split(",");
-
-		s.close();
-
-		return info;
-	}
-
-	private static void movieTransmissionToProxy(String movie, String ciphersuite, String hostname, int proxy_port,
-			Properties cryptoconfig_properties) throws Exception {
+	private static void movieTransmissionToProxy(String movie, String ciphersuite, String hostname, int proxy_port) throws Exception {
 
 		int size;
 		int csize = 0;
@@ -120,8 +182,7 @@ class hjStreamServer {
 
 				g.readFully(frame_buffer, 0, size);
 
-				DatagramPacket p = buildRTSSPPacket(DATA_TYPE, size, hostname, proxy_port, frame_buffer,
-						cryptoconfig_properties, movie, ciphersuite, seqNum);
+				DatagramPacket p = buildRTSSPPacket(DATA_TYPE, size, hostname, proxy_port, frame_buffer, movie, ciphersuite, seqNum);
 
 				long t = System.nanoTime();
 
@@ -147,12 +208,12 @@ class hjStreamServer {
 			}
 
 		} catch (FileNotFoundException e) {
-			internalError(hostname, proxy_port, movie, ciphersuite, cryptoconfig_properties);
+			internalError(hostname, proxy_port, movie, ciphersuite);
 		}
 	}
 
 	private static DatagramPacket buildRTSSPPacket(byte data_type, int payload_size, String hostname, int port,
-			byte[] payload, Properties cryptoconfig_properties, String movie, String ciphersuite, long seqNum) throws Exception {
+			byte[] payload, String movie, String ciphersuite, long seqNum) throws Exception {
 
 		InetSocketAddress addr = new InetSocketAddress(hostname, port);
 
@@ -163,7 +224,7 @@ class hjStreamServer {
 		else
 			true_payload = Arrays.copyOf(payload, payload_size);
 
-		byte[] encrypted_payload = payloadEncryption(true_payload, cryptoconfig_properties, movie, ciphersuite, seqNum);
+		byte[] encrypted_payload = payloadEncryption(true_payload, movie, ciphersuite, seqNum);
 		ByteBuffer bb = ByteBuffer.allocate(HEADER_SIZE + encrypted_payload.length);
 		int encrypted_payload_size = encrypted_payload.length;
 
@@ -179,7 +240,7 @@ class hjStreamServer {
 		return new DatagramPacket(packet_buffer, packet_buffer.length, addr);
 	}
 
-	private static byte[] payloadEncryption(byte[] payload, Properties cryptoconfig_properties, String movie,
+	private static byte[] payloadEncryption(byte[] payload, String movie,
 			String ciphersuite_selected, long seqNum)
 			throws Exception {
 		Ciphersuite cipher = null;
@@ -192,14 +253,14 @@ class hjStreamServer {
 		switch (ciphersuite_selected) {
 			case "AES/CTR/NoPadding":
 				cipherNum = "1";
-				keyHex = cryptoconfig_properties.getProperty(movie + ".mackey" + cipherNum);
+				//keyHex = cryptoconfig_properties.getProperty(movie + ".mackey" + cipherNum);
 				keyBytes = hexToBytes(keyHex);
 				macKey = new SecretKeySpec(keyBytes, "HmacSHA256");
 				cipher = new AesCtrHmacSuite(macKey);
 				break;
 			case "AES/CBC/PKCS5Padding":
 				cipherNum = "2";
-				keyHex = cryptoconfig_properties.getProperty(movie + ".mackey" + cipherNum);
+				//keyHex = cryptoconfig_properties.getProperty(movie + ".mackey" + cipherNum);
 				keyBytes = hexToBytes(keyHex);
 				macKey = new SecretKeySpec(keyBytes, "HmacSHA256");
 				cipher = new AesCbcHmacSuite(macKey);
@@ -223,17 +284,16 @@ class hjStreamServer {
 		else
 			throw new IllegalArgumentException("Unsupported algorithm");
 
-		keyHex = cryptoconfig_properties.getProperty(movie + ".key" + cipherNum);
+		//keyHex = cryptoconfig_properties.getProperty(movie + ".key" + cipherNum);
 		keyBytes = hexToBytes(keyHex);
 		SecretKey key = new SecretKeySpec(keyBytes, movieKey);
 
 		return cipher.encrypt(payload, key, seqNum);
 	}
 
-	private static void endTransmission(String movie, String ciphersuite, String hostname, int proxyPort,
-			Properties cryptoconfig_properties) throws Exception {
+	private static void endTransmission(String movie, String ciphersuite, String hostname, int proxyPort) throws Exception {
 
-		DatagramPacket packet = buildRTSSPPacket(END_TYPE, 0, hostname, proxyPort, null, cryptoconfig_properties,
+		DatagramPacket packet = buildRTSSPPacket(END_TYPE, 0, hostname, proxyPort, null,
 				movie, ciphersuite, 0);
 
 		DatagramSocket s = new DatagramSocket();
@@ -242,11 +302,9 @@ class hjStreamServer {
 		s.close();
 	}
 
-	private static void internalError(String hostname, int proxyPort, String movie, String ciphersuite,
-			Properties cryptoconfig_properties)
-			throws Exception {
+	private static void internalError(String hostname, int proxyPort, String movie, String ciphersuite) throws Exception {
 
-		DatagramPacket packet = buildRTSSPPacket(ERROR_TYPE, 0, hostname, proxyPort, null, cryptoconfig_properties,
+		DatagramPacket packet = buildRTSSPPacket(ERROR_TYPE, 0, hostname, proxyPort, null,
 				movie, ciphersuite, -1);
 
 		DatagramSocket s = new DatagramSocket();
@@ -270,5 +328,44 @@ class hjStreamServer {
 
 		return bytes;
 	}
+
+	private static KeyStore loadKeyStore(String path, char[] password) throws Exception {
+        KeyStore ks = KeyStore.getInstance("PKCS12");
+
+        try (FileInputStream fis = new FileInputStream(path)) {
+            ks.load(fis, password);
+        }   
+
+        return ks;
+    }
+
+    private static PrivateKey loadPrivateKey(KeyStore ks, String alias, char[] keyPassword) throws Exception {
+
+        return (PrivateKey) ks.getKey(alias, keyPassword);
+    }
+
+    private static byte[] loadCertificateBytes(KeyStore ks, String alias) throws Exception {
+
+        Certificate cert = ks.getCertificate(alias);
+
+        if (cert == null) {
+            throw new IllegalArgumentException("Certificate not found for alias: " + alias);
+        }
+
+        return cert.getEncoded();
+    }
+
+    private static byte[] generateNonce() {
+        byte[] nonce = new byte[32];
+        new SecureRandom().nextBytes(nonce);
+        return nonce;
+    }
+
+	private static boolean isCertificateTrusted(Certificate receivedCert, KeyStore trustStore) throws Exception {
+    	String alias = trustStore.getCertificateAlias(receivedCert);
+
+    	return alias != null;
+	}
+
 
 }
