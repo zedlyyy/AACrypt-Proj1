@@ -56,10 +56,10 @@ public class AesCbcHmacSuite implements Ciphersuite {
         if (encryptedData.length < 16 + macLength)
             throw new IllegalArgumentException("Encrypted packet too short");
         
-        byte[] seqBytes = ByteBuffer.allocate(8).putLong(seqNum).array();
-
         byte[] iv = new byte[16];
         byteBuffer.get(iv);
+
+        byte[] seqBytes = ByteBuffer.allocate(8).putLong(seqNum).array();
 
         byte[] cipherText = new byte[byteBuffer.remaining() - macLength];
         byteBuffer.get(cipherText);

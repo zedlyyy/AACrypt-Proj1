@@ -182,7 +182,6 @@ class hjUDPproxy {
                     }
 
                     lastSeq = seqNum;
-
                     sendFrame(payload, outSocketAddressSet, outSocket, movieAndCiphersuite, cryptoconfig_properties, seqNum);
                     break;
                 case END_TYPE:
