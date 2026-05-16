@@ -10,9 +10,8 @@ import java.io.*;
 import java.net.*;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
-import java.util.Enumeration;
+import java.util.Base64;
 import java.util.List;
-import java.util.Properties;
 import java.util.Scanner;
 import java.security.KeyPair;
 import java.security.KeyStore;
@@ -26,7 +25,6 @@ import java.security.cert.CertificateFactory;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
-
 import part2.SHPmessages.*;
 import part2.ECDH.*;
 import part2.cipherSuites.AesCbcHmacSuite;
@@ -39,10 +37,12 @@ class hjStreamServer {
 
 	private static final int SERVER_PORT = 8888;
 	private static final int PROXY_PORT = 9999;
-	private static final String FILMS_FOLDER = "StreamServer/movies/";
+	private static final String FILMS_FOLDER = "part2/StreamServer/movies/";
 	private static final String KEYSTORE_PATH = "part2/StreamServer/server-truststore.p12";
 	private static PrivateKey server_ECDH_PrivateKey;
 	private static byte[] server_nonce;
+	private static SecretKey macKey;
+	private static SecretKey encryptionKey;
 	private static final byte PROTOCOL_VERSION = 1;
 	private static final int HEADER_SIZE = 14;
 	private static final byte START_TYPE = 1;
@@ -62,14 +62,13 @@ class hjStreamServer {
 
 		DatagramSocket s = new DatagramSocket(SERVER_PORT);
 
-		//String movie_selected = movieSelected(s);
+		// String movie_selected = movieSelected(s);
 
 		String[] ciphersuite_and_movie = startSHPserver(s, scanner);
-		
+
 		String ciphersuite_selected = ciphersuite_and_movie[0];
 		String movie_selected = ciphersuite_and_movie[1];
 
-		
 		startTransmission(movie_selected, ciphersuite_selected, hostname, PROXY_PORT);
 		movieTransmissionToProxy(movie_selected, ciphersuite_selected, hostname, PROXY_PORT);
 		endTransmission(movie_selected, ciphersuite_selected, hostname, PROXY_PORT);
@@ -77,26 +76,49 @@ class hjStreamServer {
 	}
 
 	private static String[] startSHPserver(DatagramSocket s, Scanner scanner) throws Exception {
-		byte[] client_message_byte = receiveSHPclientHelloMessage(s);
+		DatagramPacket chPacket = receiveSHPclientHelloMessage(s);
+
+		byte[] client_message_byte = Arrays.copyOfRange(chPacket.getData(), chPacket.getOffset(),
+				chPacket.getOffset() + chPacket.getLength());
 
 		ClientHello ch = ClientHello.deserialize(client_message_byte);
 		clientHelloVerification(ch);
 		String cipher_selected = selectCiphersuite(ch.getCipherSuites(), scanner);
-		byte[] server_hello_message = buildServerHelloMessage(cipher_selected, ch);
-		sendServerHelloMessage(server_hello_message, s);
-		
-		
-		System.out.println("TODO");
-		return null;
+
+		KeyPair serverECDH = CryptoUtils.generateECDHKeyPair();
+		server_ECDH_PrivateKey = serverECDH.getPrivate();
+
+		byte[] server_hello_message = buildServerHelloMessage(cipher_selected, ch, serverECDH);
+		sendServerHelloMessage(server_hello_message, s, chPacket.getSocketAddress());
+
+		PublicKey clientECDHPublicKey = CryptoUtils.decodePublicKey(ch.getClient_pub_ECDH_key());
+		byte[] sharedSecret = CryptoUtils.deriveSharedSecret(server_ECDH_PrivateKey, clientECDHPublicKey);
+
+		int keySize = cipher_selected.contains("ChaCha20") ? 32 : 16;
+
+		String algorithm = cipher_selected.contains("ChaCha20") ? "ChaCha20" : "AES";
+
+		byte[] encryptionKey_bytes = CryptoUtils.hmacDF(sharedSecret, "encryption".getBytes(), keySize);
+		encryptionKey = new SecretKeySpec(encryptionKey_bytes, algorithm);
+		System.out.println("Encryption key: " + Base64.getEncoder().encodeToString(encryptionKey_bytes));
+
+		byte[] macKey_bytes = CryptoUtils.hmacDF(sharedSecret, "mac".getBytes(), 32);
+		macKey = new SecretKeySpec(macKey_bytes, "HmacSHA256");
+		System.out.println("Mac key: " + Base64.getEncoder().encodeToString(macKey_bytes));
+
+		return new String[] { cipher_selected, ch.getMovieName() };
 	}
 
-	private static void sendServerHelloMessage(byte[] server_hello_message, DatagramSocket s) {
-		// TODO Auto-generated method stub
-		throw new UnsupportedOperationException("Unimplemented method 'sendServerHelloMessage'");
+	private static void sendServerHelloMessage(byte[] server_hello_message, DatagramSocket s,
+			SocketAddress clientAddress) throws IOException {
+
+		DatagramPacket packet = new DatagramPacket(server_hello_message, server_hello_message.length, clientAddress);
+		s.send(packet);
 	}
 
-	private static byte[] buildServerHelloMessage(String cipher_selected, ClientHello ch) throws Exception {
-		
+	private static byte[] buildServerHelloMessage(String cipher_selected, ClientHello ch, KeyPair serverECDH)
+			throws Exception {
+
 		char[] key_store_pass = "pedrodiogo".toCharArray();
 		String alias = "server";
 
@@ -106,17 +128,15 @@ class hjStreamServer {
 
 		byte[] server_certificate = loadCertificateBytes(server_key_store, alias);
 
-		KeyPair ECDH_key_pair = CryptoUtils.generateECDHKeyPair();
-        server_ECDH_PrivateKey = ECDH_key_pair.getPrivate();
-
-		byte[] encoded_ECDH_public_key = ECDH_key_pair.getPublic().getEncoded();
+		byte[] encoded_ECDH_public_key = serverECDH.getPublic().getEncoded();
 
 		byte[] nonce = generateNonce();
-        server_nonce = nonce;
+		server_nonce = nonce;
 
 		byte[] client_nonce_response = computeNonceResponse(ch.getNonce());
 
-		ServerHello sh = new ServerHello(server_certificate, encoded_ECDH_public_key, null, server_nonce, client_nonce_response, cipher_selected);
+		ServerHello sh = new ServerHello(server_certificate, encoded_ECDH_public_key, null, server_nonce,
+				client_nonce_response, cipher_selected);
 
 		byte[] dataToSign = sh.serializeData();
 		byte[] signature = CryptoUtils.sign(server_private_key, dataToSign);
@@ -128,62 +148,61 @@ class hjStreamServer {
 
 	}
 
-	private static String selectCiphersuite(List<String> cipher_suites, Scanner scanner) {
+	private static String selectCiphersuite(List<String> cipher_suites, Scanner scanner) throws Exception {
 		System.out.println("Select one Ciphersuite from the following list: ");
 
-        for (int i = 1; i <= cipher_suites.size(); i++) {
-            System.out.println(i + " - " + cipher_suites.get(i-1));
-        }
+		for (int i = 1; i <= cipher_suites.size(); i++) {
+			System.out.println(i + " - " + cipher_suites.get(i - 1));
+		}
 
-        String choise_selected = scanner.nextLine();
-		String ciphersuite_selected = "";
-		if (choise_selected.equals("1"))
-                ciphersuite_selected = cipher_suites.get(0);
-            else if (ciphersuite_selected.equals("2"))
-                ciphersuite_selected = cipher_suites.get(1);
-            else
-                System.out.println("Ciphersuite selection failed.");
-		
-		return ciphersuite_selected;
+		String choice_selected = scanner.nextLine();
+
+		if (choice_selected.equals("1"))
+			return cipher_suites.get(0);
+		else if (choice_selected.equals("2"))
+			return cipher_suites.get(1);
+		else
+			throw new Exception("Ciphersuite selection failed.");
 	}
 
 	private static void clientHelloVerification(ClientHello ch) throws Exception {
-		
+
 		CertificateFactory cf = CertificateFactory.getInstance("X.509");
 
-    	Certificate clientCert = cf.generateCertificate( new ByteArrayInputStream(ch.getCertificate()));
+		Certificate clientCert = cf.generateCertificate(new ByteArrayInputStream(ch.getCertificate()));
 
 		KeyStore serverTrustStore = loadKeyStore(KEYSTORE_PATH, "pedrodiogo".toCharArray());
 
 		if (!isCertificateTrusted(clientCert, serverTrustStore)) {
-        	throw new SecurityException("Client certificate is not trusted");
-    	}
+			throw new SecurityException("Client certificate is not trusted");
+		}
 
 		PublicKey clientPublicKey = clientCert.getPublicKey();
 
 		boolean validSignature = CryptoUtils.verify(clientPublicKey, ch.serializeData(), ch.getSignature());
 
 		if (!validSignature) {
-        	throw new SecurityException("Invalid ClientHello signature");
-    	}
+			throw new SecurityException("Invalid ClientHello signature");
+		}
 
 		System.out.println("ClientHello accepted.");
-    	System.out.println("Requested movie: " + ch.getMovie_name());
+		System.out.println("Requested movie: " + ch.getMovieName());
 
 	}
 
-	private static byte[] receiveSHPclientHelloMessage(DatagramSocket s) throws IOException {
+	private static DatagramPacket receiveSHPclientHelloMessage(DatagramSocket s) throws IOException {
 		System.out.println("Waiting for proxy connection ...");
 		byte[] buffer = new byte[8192];
 
-    	DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+		DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
 
-    	s.receive(packet);
+		s.receive(packet);
 
-    	return Arrays.copyOfRange(packet.getData(), packet.getOffset(), packet.getOffset() + packet.getLength());
+		return packet;
 	}
 
-	private static void startTransmission(String movie, String ciphersuite, String hostname, int proxyPort) throws Exception {
+	private static void startTransmission(String movie, String ciphersuite, String hostname, int proxyPort)
+			throws Exception {
 
 		DatagramPacket packet = buildRTSSPPacket(START_TYPE, 0, hostname, proxyPort, null,
 				movie, ciphersuite, 0);
@@ -195,7 +214,8 @@ class hjStreamServer {
 
 	}
 
-	private static void movieTransmissionToProxy(String movie, String ciphersuite, String hostname, int proxy_port) throws Exception {
+	private static void movieTransmissionToProxy(String movie, String ciphersuite, String hostname, int proxy_port)
+			throws Exception {
 
 		int size;
 		int csize = 0;
@@ -225,12 +245,14 @@ class hjStreamServer {
 
 				g.readFully(frame_buffer, 0, size);
 
-				DatagramPacket p = buildRTSSPPacket(DATA_TYPE, size, hostname, proxy_port, frame_buffer, movie, ciphersuite, seqNum);
+				DatagramPacket p = buildRTSSPPacket(DATA_TYPE, size, hostname, proxy_port, frame_buffer, movie,
+						ciphersuite, seqNum);
 
 				long t = System.nanoTime();
 
 				Thread.sleep(Math.max(0, ((time - q0) - (t - t0)) / 1000000));
 
+				System.out.println("Sending frame seq=" + seqNum);
 				s.send(p);
 
 				System.out.print(":");
@@ -251,6 +273,7 @@ class hjStreamServer {
 			}
 
 		} catch (FileNotFoundException e) {
+			e.printStackTrace();
 			internalError(hostname, proxy_port, movie, ciphersuite);
 		}
 	}
@@ -286,55 +309,57 @@ class hjStreamServer {
 	private static byte[] payloadEncryption(byte[] payload, String movie,
 			String ciphersuite_selected, long seqNum)
 			throws Exception {
+
 		Ciphersuite cipher = null;
-		String cipherNum = "0";
-		String movieKey = "";
-		String keyHex = "";
-		byte[] keyBytes = null;
-		SecretKey macKey = null;
+
+		// String movieKey = "";
+		// String keyHex = "";
+		// byte[] keyBytes = null;
+		// SecretKey macKey = null;
 
 		switch (ciphersuite_selected) {
 			case "AES/CTR/NoPadding":
-				cipherNum = "1";
-				//keyHex = cryptoconfig_properties.getProperty(movie + ".mackey" + cipherNum);
-				keyBytes = hexToBytes(keyHex);
-				macKey = new SecretKeySpec(keyBytes, "HmacSHA256");
+				// keyHex = cryptoconfig_properties.getProperty(movie + ".mackey" + cipherNum);
+				// keyBytes = hexToBytes(keyHex);
+				// macKey = new SecretKeySpec(keyBytes, "HmacSHA256");
 				cipher = new AesCtrHmacSuite(macKey);
 				break;
 			case "AES/CBC/PKCS5Padding":
-				cipherNum = "2";
-				//keyHex = cryptoconfig_properties.getProperty(movie + ".mackey" + cipherNum);
-				keyBytes = hexToBytes(keyHex);
-				macKey = new SecretKeySpec(keyBytes, "HmacSHA256");
+				// keyHex = cryptoconfig_properties.getProperty(movie + ".mackey" + cipherNum);
+				// keyBytes = hexToBytes(keyHex);
+				// macKey = new SecretKeySpec(keyBytes, "HmacSHA256");
 				cipher = new AesCbcHmacSuite(macKey);
 				break;
 			case "ChaCha20-Poly1305":
 				cipher = new ChaCha20Poly1305Suite();
-				cipherNum = "1";
 				break;
 			case "AES/GCM/NoPadding":
 				cipher = new AesGcmSuite();
-				cipherNum = "2";
 				break;
 			default:
 				break;
 		}
 
-		if (ciphersuite_selected.contains("AES"))
-			movieKey = "AES";
-		else if (ciphersuite_selected.contains("ChaCha20"))
-			movieKey = "ChaCha20";
-		else
-			throw new IllegalArgumentException("Unsupported algorithm");
+		/*
+		 * if (ciphersuite_selected.contains("AES"))
+		 * movieKey = "AES";
+		 * else if (ciphersuite_selected.contains("ChaCha20"))
+		 * movieKey = "ChaCha20";
+		 * else
+		 * throw new IllegalArgumentException("Unsupported algorithm");
+		 * 
+		 * // keyHex = cryptoconfig_properties.getProperty(movie + ".key" + cipherNum);
+		 * // keyBytes = hexToBytes(keyHex);
+		 * // SecretKey key = new SecretKeySpec(keyBytes, movieKey);
+		 * 
+		 * //return cipher.encrypt(payload, key, seqNum);
+		 */
 
-		//keyHex = cryptoconfig_properties.getProperty(movie + ".key" + cipherNum);
-		keyBytes = hexToBytes(keyHex);
-		SecretKey key = new SecretKeySpec(keyBytes, movieKey);
-
-		return cipher.encrypt(payload, key, seqNum);
+		return cipher.encrypt(payload, encryptionKey, seqNum);
 	}
 
-	private static void endTransmission(String movie, String ciphersuite, String hostname, int proxyPort) throws Exception {
+	private static void endTransmission(String movie, String ciphersuite, String hostname, int proxyPort)
+			throws Exception {
 
 		DatagramPacket packet = buildRTSSPPacket(END_TYPE, 0, hostname, proxyPort, null,
 				movie, ciphersuite, 0);
@@ -345,7 +370,8 @@ class hjStreamServer {
 		s.close();
 	}
 
-	private static void internalError(String hostname, int proxyPort, String movie, String ciphersuite) throws Exception {
+	private static void internalError(String hostname, int proxyPort, String movie, String ciphersuite)
+			throws Exception {
 
 		DatagramPacket packet = buildRTSSPPacket(ERROR_TYPE, 0, hostname, proxyPort, null,
 				movie, ciphersuite, -1);
@@ -356,66 +382,67 @@ class hjStreamServer {
 		s.close();
 	}
 
-	private static byte[] hexToBytes(String hex) {
-		if (hex.length() % 2 != 0) {
-			throw new IllegalArgumentException("Invalid hex string");
-		}
-
-		byte[] bytes = new byte[hex.length() / 2];
-
-		for (int i = 0; i < bytes.length; i++) {
-			bytes[i] = (byte) Integer.parseInt(
-					hex.substring(2 * i, 2 * i + 2),
-					16);
-		}
-
-		return bytes;
-	}
+	/*
+	 * private static byte[] hexToBytes(String hex) {
+	 * if (hex.length() % 2 != 0) {
+	 * throw new IllegalArgumentException("Invalid hex string");
+	 * }
+	 * 
+	 * byte[] bytes = new byte[hex.length() / 2];
+	 * 
+	 * for (int i = 0; i < bytes.length; i++) {
+	 * bytes[i] = (byte) Integer.parseInt(
+	 * hex.substring(2 * i, 2 * i + 2),
+	 * 16);
+	 * }
+	 * 
+	 * return bytes;
+	 * }
+	 */
 
 	private static KeyStore loadKeyStore(String path, char[] password) throws Exception {
-        KeyStore ks = KeyStore.getInstance("PKCS12");
+		KeyStore ks = KeyStore.getInstance("PKCS12");
 
-        try (FileInputStream fis = new FileInputStream(path)) {
-            ks.load(fis, password);
-        }   
+		try (FileInputStream fis = new FileInputStream(path)) {
+			ks.load(fis, password);
+		}
 
-        return ks;
-    }
+		return ks;
+	}
 
-    private static PrivateKey loadPrivateKey(KeyStore ks, String alias, char[] keyPassword) throws Exception {
+	private static PrivateKey loadPrivateKey(KeyStore ks, String alias, char[] keyPassword) throws Exception {
 
-        return (PrivateKey) ks.getKey(alias, keyPassword);
-    }
+		return (PrivateKey) ks.getKey(alias, keyPassword);
+	}
 
-    private static byte[] loadCertificateBytes(KeyStore ks, String alias) throws Exception {
+	private static byte[] loadCertificateBytes(KeyStore ks, String alias) throws Exception {
 
-        Certificate cert = ks.getCertificate(alias);
+		Certificate cert = ks.getCertificate(alias);
 
-        if (cert == null) {
-            throw new IllegalArgumentException("Certificate not found for alias: " + alias);
-        }
+		if (cert == null) {
+			throw new IllegalArgumentException("Certificate not found for alias: " + alias);
+		}
 
-        return cert.getEncoded();
-    }
+		return cert.getEncoded();
+	}
 
-    private static byte[] generateNonce() {
-        byte[] nonce = new byte[32];
-        new SecureRandom().nextBytes(nonce);
-        return nonce;
-    }
+	private static byte[] generateNonce() {
+		byte[] nonce = new byte[32];
+		new SecureRandom().nextBytes(nonce);
+		return nonce;
+	}
 
 	private static boolean isCertificateTrusted(Certificate receivedCert, KeyStore trustStore) throws Exception {
-    	String alias = trustStore.getCertificateAlias(receivedCert);
+		String alias = trustStore.getCertificateAlias(receivedCert);
 
-    	return alias != null;
+		return alias != null;
 	}
 
 	private static byte[] computeNonceResponse(
-        byte[] clientNonce) throws Exception {
-    	MessageDigest md = MessageDigest.getInstance("SHA-256");
+			byte[] clientNonce) throws Exception {
+		MessageDigest md = MessageDigest.getInstance("SHA-256");
 
-    return md.digest(clientNonce);
-}
-
+		return md.digest(clientNonce);
+	}
 
 }

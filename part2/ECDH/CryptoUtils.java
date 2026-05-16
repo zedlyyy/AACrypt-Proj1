@@ -3,6 +3,9 @@ package part2.ECDH;
 import java.security.*;
 import java.security.spec.*;
 import javax.crypto.KeyAgreement;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+
 import java.util.Base64;
 
 public class CryptoUtils {
@@ -45,5 +48,38 @@ public class CryptoUtils {
         return kf.generatePublic(new X509EncodedKeySpec(encoded));
     }
 
-    
+    public static byte[] hmacDF(byte[] key, byte[] data, int size) throws Exception {
+        Mac mac = Mac.getInstance("HmacSHA256");
+
+        byte[] salt = new byte[32];
+        mac.init(new SecretKeySpec(salt, "HmacSHA256"));
+        byte[] prk = mac.doFinal(key);
+
+        mac.init(new SecretKeySpec(prk, "HmacSHA256"));
+
+        byte[] res = new byte[size];
+        byte[] previous = new byte[0];
+
+        int offset = 0;
+        byte counter = 1;
+
+        while (offset < size) {
+            mac.reset();
+
+            mac.update(previous);
+            mac.update(data);
+            mac.update(counter);
+
+            previous = mac.doFinal();
+
+            int remainder = size - offset;
+            int length = Math.min(previous.length, remainder);
+
+            System.arraycopy(previous, 0, res, offset, length);
+            offset += length;
+            counter++;
+        }
+
+        return res;
+    }
 }

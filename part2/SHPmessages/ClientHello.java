@@ -125,7 +125,7 @@ public class ClientHello {
         return new ClientHello(movie_name, encoded_certificate, encoded_ECDH_public_key, signature, nonce, cipherSuites);
     }
 
-    public String getMovie_name() {
+    public String getMovieName() {
     return movie_name;
     }
 
