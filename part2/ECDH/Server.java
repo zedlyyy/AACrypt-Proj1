@@ -3,7 +3,6 @@ package part2.ECDH;
 import java.net.*;
 import java.io.*;
 import java.security.*;
-import java.util.Base64;
 
 public class Server {
 
@@ -51,15 +50,6 @@ public class Server {
         if (!CryptoUtils.verify(clientIdPub, clientPub, clientSig)) {
             throw new SecurityException("Client authentication failed");
         }
-
-        PublicKey clientECDHPub = CryptoUtils.decodePublicKey(clientPub);
-
-        byte[] sharedSecret = CryptoUtils.deriveSharedSecret(
-                serverECDH.getPrivate(), clientECDHPub);
-
-        System.out.println("Shared Secret: " + Base64.getEncoder().encodeToString(sharedSecret));
-
-        // Then is possible to derive keys, nonces, initialization vectors, etc        // from the obtained shared secret obtained in the DH agreement   
 
         socket.close();
         serverSocket.close();

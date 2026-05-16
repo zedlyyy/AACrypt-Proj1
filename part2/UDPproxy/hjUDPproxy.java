@@ -25,12 +25,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
-import java.net.MulticastSocket;
 import java.net.InetSocketAddress;
-import java.net.InetAddress;
 import java.net.SocketAddress;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
@@ -44,9 +41,7 @@ import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.SecureRandom;
 import java.security.cert.Certificate;
-import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
-import java.io.FileInputStream;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
@@ -315,33 +310,12 @@ class hjUDPproxy {
             throws Exception {
 
         Ciphersuite cipher = null;
-        // String movieKey = "";
-
-        // String keyHex = "";
-        // byte[] keyBytes = null;
-        // SecretKey macKey = null;
-
-        // String[] info = movieAndCiphersuite.split(",");
-        // String movie_selected = info[0];
-        // String ciphersuite_selected = info[1];
 
         switch (ciphersuite_selected) {
             case "AES/CTR/NoPadding":
-                /*
-                 * keyHex = cryptoconfig_properties.getProperty(movie_selected + ".mackey" +
-                 * cipherNum);
-                 * keyBytes = hexToBytes(keyHex);
-                 * macKey = new SecretKeySpec(keyBytes, "HmacSHA256");
-                 */
                 cipher = new AesCtrHmacSuite(macKey);
                 break;
             case "AES/CBC/PKCS5Padding":
-                /*
-                 * keyHex = cryptoconfig_properties.getProperty(movie_selected + ".mackey" +
-                 * cipherNum);
-                 * keyBytes = hexToBytes(keyHex);
-                 * macKey = new SecretKeySpec(keyBytes, "HmacSHA256");
-                 */
                 cipher = new AesCbcHmacSuite(macKey);
                 break;
             case "ChaCha20-Poly1305":
@@ -354,46 +328,12 @@ class hjUDPproxy {
                 break;
         }
 
-        /*
-         * if (ciphersuite_selected.contains("AES"))
-         * movieKey = "AES";
-         * else if (ciphersuite_selected.contains("ChaCha20"))
-         * movieKey = "ChaCha20";
-         * else
-         * throw new IllegalArgumentException("Unsupported algorithm");
-         * 
-         * keyHex = cryptoconfig_properties.getProperty(movie_selected + ".key" +
-         * cipherNum);
-         * keyBytes = hexToBytes(keyHex);
-         * SecretKey key = new SecretKeySpec(keyBytes, movieKey);
-         * 
-         * byte[] payload_decrypted = cipher.decrypt(payload, key, seqNum);
-         */
-
         byte[] payload_decrypted = cipher.decrypt(payload, encryptionKey, seqNum);
 
         for (SocketAddress outSocketAddress : outSocketAddressSet) {
             outSocket.send(new DatagramPacket(payload_decrypted, payload_decrypted.length, outSocketAddress));
         }
     }
-
-    /*
-     * private static byte[] hexToBytes(String hex) {
-     * if (hex.length() % 2 != 0) {
-     * throw new IllegalArgumentException("Invalid hex string");
-     * }
-     * 
-     * byte[] bytes = new byte[hex.length() / 2];
-     * 
-     * for (int i = 0; i < bytes.length; i++) {
-     * bytes[i] = (byte) Integer.parseInt(
-     * hex.substring(2 * i, 2 * i + 2),
-     * 16);
-     * }
-     * 
-     * return bytes;
-     * }
-     */
 
     private static KeyStore loadKeyStore(String path, char[] password) throws Exception {
         KeyStore ks = KeyStore.getInstance("PKCS12");

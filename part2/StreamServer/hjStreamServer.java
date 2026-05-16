@@ -312,22 +312,11 @@ class hjStreamServer {
 
 		Ciphersuite cipher = null;
 
-		// String movieKey = "";
-		// String keyHex = "";
-		// byte[] keyBytes = null;
-		// SecretKey macKey = null;
-
 		switch (ciphersuite_selected) {
 			case "AES/CTR/NoPadding":
-				// keyHex = cryptoconfig_properties.getProperty(movie + ".mackey" + cipherNum);
-				// keyBytes = hexToBytes(keyHex);
-				// macKey = new SecretKeySpec(keyBytes, "HmacSHA256");
 				cipher = new AesCtrHmacSuite(macKey);
 				break;
 			case "AES/CBC/PKCS5Padding":
-				// keyHex = cryptoconfig_properties.getProperty(movie + ".mackey" + cipherNum);
-				// keyBytes = hexToBytes(keyHex);
-				// macKey = new SecretKeySpec(keyBytes, "HmacSHA256");
 				cipher = new AesCbcHmacSuite(macKey);
 				break;
 			case "ChaCha20-Poly1305":
@@ -339,22 +328,6 @@ class hjStreamServer {
 			default:
 				break;
 		}
-
-		/*
-		 * if (ciphersuite_selected.contains("AES"))
-		 * movieKey = "AES";
-		 * else if (ciphersuite_selected.contains("ChaCha20"))
-		 * movieKey = "ChaCha20";
-		 * else
-		 * throw new IllegalArgumentException("Unsupported algorithm");
-		 * 
-		 * // keyHex = cryptoconfig_properties.getProperty(movie + ".key" + cipherNum);
-		 * // keyBytes = hexToBytes(keyHex);
-		 * // SecretKey key = new SecretKeySpec(keyBytes, movieKey);
-		 * 
-		 * //return cipher.encrypt(payload, key, seqNum);
-		 */
-
 		return cipher.encrypt(payload, encryptionKey, seqNum);
 	}
 
@@ -381,24 +354,6 @@ class hjStreamServer {
 
 		s.close();
 	}
-
-	/*
-	 * private static byte[] hexToBytes(String hex) {
-	 * if (hex.length() % 2 != 0) {
-	 * throw new IllegalArgumentException("Invalid hex string");
-	 * }
-	 * 
-	 * byte[] bytes = new byte[hex.length() / 2];
-	 * 
-	 * for (int i = 0; i < bytes.length; i++) {
-	 * bytes[i] = (byte) Integer.parseInt(
-	 * hex.substring(2 * i, 2 * i + 2),
-	 * 16);
-	 * }
-	 * 
-	 * return bytes;
-	 * }
-	 */
 
 	private static KeyStore loadKeyStore(String path, char[] password) throws Exception {
 		KeyStore ks = KeyStore.getInstance("PKCS12");
