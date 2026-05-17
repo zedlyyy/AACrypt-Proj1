@@ -1,5 +1,5 @@
 # Advanced Applied Cryptography Project Assignment
-Project for AACrypt-2026 by **Diogo Nunes** and **Pedro Galego**
+Project for AACrypt-2026 by **Diogo Nunes** - 70502 and **Pedro Galego** - 72298 
 
 # Como correr o projecto
 Para correr cada parte, temos que indicar o pathing correto para cada uma das partes.
