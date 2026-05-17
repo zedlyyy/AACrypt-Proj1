@@ -8,5 +8,6 @@ Primeiramente, para compilar tudo fazemos:
 ? pode ser 1 ou 2 dependedo da parte do projeto que quremos compilar
 Para correr o programa, primeiro executamos o servidor:
 - `java -cp . part?.StreamServer.hjStreamServer localhost `
+
 E de seguida executamos o nosso proxy:
 - `java -cp . part?.UDPproxy.hjUDPproxy`
