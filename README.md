@@ -1,4 +1,15 @@
 # Advanced Applied Cryptography Project Assignment
+
+## Overview
+
+Advanced Applied Cryptography coursework exploring protected streaming communication in Java. The project is organized into two parts and includes a streaming server, cipher suite components, and a UDP proxy.
+
+**Technologies:** Java, UDP networking, applied cryptography.
+
+**Key components:** Streaming server, cryptographic cipher suites, UDP proxy.
+
+---
+
 Project for AACrypt-2026 by **Diogo Nunes** - 70502 and **Pedro Galego** - 72298 
 
 # Como correr o projecto
